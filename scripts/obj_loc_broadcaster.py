@@ -49,14 +49,14 @@ class obj_loc_broadcaster:
 
         for i in range(self.map[obj_type]):
             #keep broadcasting to prevent loss of new (temp) frame
-		    while True:
-				try:
-					new_ps.header.stamp = self.trans.getLatestCommonTime(self.origin_frame, self.origin_frame)
-	            	ps = self.trans.transformPose('/'+obj_type+'_'+str(i), new_ps)
-	            	break
+            while True:
+                try:
+                    new_ps.header.stamp = self.trans.getLatestCommonTime(self.origin_frame, self.origin_frame)
+                    ps = self.trans.transformPose('/'+obj_type+'_'+str(i), new_ps)
+                    break
 
-	            except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
-	                rospy.loginfo(e)
+                except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
+                    rospy.loginfo(e)
             
             trans = ps.pose.position
 
