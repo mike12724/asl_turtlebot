@@ -56,7 +56,8 @@ class obj_loc_broadcaster:
                     break
 
                 except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
-                    rospy.loginfo(e)
+                    #rospy.loginfo(e)
+                    pass
             
             trans = ps.pose.position
 

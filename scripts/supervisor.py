@@ -75,6 +75,7 @@ class Supervisor:
         self.y = 0
         self.theta = 0
         self.V = 0
+        self.x_g, self.y_g, self.theta_g = 0.0, 0.0, 0.0
         self.mode = Mode.IDLE
         self.last_mode_printed = None
         self.stop_sign_loc = None #for checking if we've successfully crossed
@@ -116,7 +117,8 @@ class Supervisor:
         for class_label in self.dict_of_all_obj_labels.values():
             # Here, we can pick which labels we want a subscriber for. 
             # Check out the COCO dataset if you want to know which are options.
-            if not class_label in ["stop_sign", "banana"]: continue
+            #if not class_label in ["stop_sign", "banana"]: continue
+            if not class_label in ["person", "backpack", "stop_sign"]: continue
             print("INFO: creating subscriber for: {}".format(class_label))
             rospy.Subscriber(
                 '/detector/'+class_label, 
@@ -136,7 +138,7 @@ class Supervisor:
             th_l = th_l - 2*math.pi
         th_c = 0.5*(th_r + th_l) # THIS IS AN APPROX
 
-        dist = msg.distance #FIXME WITH LIDAR
+        dist = msg.distance
         x_from_cam = dist * math.cos(th_c)
         y_from_cam = dist * math.sin(th_c)
         theta_from_cam = math.pi+self.theta #assume sign is directly facing us
@@ -200,12 +202,14 @@ class Supervisor:
             self.mode = Mode.NAV
 
     def delivery_callback(self,msg):
+        rospy.loginfo('Delivery received, splitting data!')
         delivery_targets = msg.data.split(',')
         if len(self.delivery_targets) == 0:
-            self.delivery_targets = ['/'+target+'_0' for target in delivery_targets]
-            self.get_next_target()
+            #self.delivery_targets = ['/'+target+'_0' for target in delivery_targets]
+            self.delivery_targets = [target for target in delivery_targets]
 
     def get_next_target(self):
+        rospy.loginfo(("Getting next target, current list:", self.delivery_targets))
         if 'return_to_home' in self.delivery_targets[0]:
             self.x_g = 0.0
             self.y_g = 0.0
@@ -221,7 +225,8 @@ class Supervisor:
                 del self.delivery_targets[0]
 
             except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
-                rospy.loginfo(e)
+                #rospy.loginfo(e)
+                pass
 
         self.delivery_targets = sorted(tgts_plus_dist, key=lambda tup: tup[1])
         self.delivery_targets = [a[0] for a in self.delivery_targets] 
@@ -230,17 +235,22 @@ class Supervisor:
         self.set_next_target(self.delivery_targets.pop())
 
     def set_next_target(self, tgt_name):
+        rospy.loginfo(("Setting destination:", tgt_name))
         while True:
             try:
                 (dist_1,rot) = self.trans_listener.lookupTransform(tgt_name, '/map', rospy.Time()) 
+                ang = np.atan2(dist_1[1]-self.y, dist_1[0]-self.x)             
                 self.x_g = dist_1[0]
                 self.y_g = dist_1[1]
-                self.theta_g = dist_1[2]
+                self.theta_g = ang
                 break
 
             except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
-                rospy.loginfo(e)
-
+                pass
+                #rospy.loginfo(e)
+        if self.mode == Mode.IDLE:
+            self.mode = Mode.NAV
+        rospy.loginfo("Destination set!")
 
     def within_range_of_stop(self, sign_frame_id):
         try:
@@ -255,7 +265,7 @@ class Supervisor:
                 return False
 
         except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
-            rospy.loginfo(e)
+            #rospy.loginfo(e)
             return -1
 
 
