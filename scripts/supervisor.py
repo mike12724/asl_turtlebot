@@ -19,6 +19,7 @@ import numpy as np
 from enum import Enum
 import detector # for loading object labels
 from collections import defaultdict 
+from utils import THETA_EPS, POS_EPS
 
 # if sim is True/using gazebo, therefore want to subscribe to /gazebo/model_states\
 # otherwise, they will use a TF lookup (hw2+)
@@ -32,8 +33,8 @@ mapping = rospy.get_param("map")
 
 
 # threshold at which we consider the robot at a location
-POS_EPS = .3
-THETA_EPS = .3
+#POS_EPS = .1
+#THETA_EPS = np.pi / 4.0
 
 #threshold for considering two detected objects as the same
 DETECT_EPS = 0.3
@@ -42,7 +43,7 @@ DETECT_EPS = 0.3
 STOP_TIME = 3
 
 # minimum distance from a stop sign to obey it
-STOP_MIN_DIST = 1.3
+STOP_MIN_DIST = 0.7
 
 # time taken to cross an intersection
 CROSSING_TIME = 3
@@ -118,7 +119,7 @@ class Supervisor:
             # Here, we can pick which labels we want a subscriber for. 
             # Check out the COCO dataset if you want to know which are options.
             #if not class_label in ["stop_sign", "banana"]: continue
-            if not class_label in ["person", "backpack", "stop_sign"]: continue
+            if not class_label in ["person", "banana", "bottle", "backpack", "stop_sign"]: continue
             print("INFO: creating subscriber for: {}".format(class_label))
             rospy.Subscriber(
                 '/detector/'+class_label, 
@@ -238,7 +239,7 @@ class Supervisor:
         rospy.loginfo(("Setting destination:", tgt_name))
         while True:
             try:
-                (dist_1,rot) = self.trans_listener.lookupTransform(tgt_name, '/map', rospy.Time()) 
+                (dist_1,rot) = self.trans_listener.lookupTransform('/map', tgt_name, rospy.Time()) 
                 ang = np.arctan2(dist_1[1]-self.y, dist_1[0]-self.x)             
                 self.x_g = dist_1[0]
                 self.y_g = dist_1[1]
@@ -246,8 +247,7 @@ class Supervisor:
                 break
 
             except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
-                pass
-                #rospy.loginfo(e)
+                rospy.loginfo(e)
         if self.mode == Mode.IDLE:
             self.mode = Mode.NAV
         rospy.loginfo("Destination set!")

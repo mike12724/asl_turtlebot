@@ -12,8 +12,9 @@
 
   <node pkg="asl_turtlebot" type="obj_loc_broadcaster.py" name="broadcaster"/>
 
-  <node pkg="asl_turtlebot" type="pose_controller.py" name="pose_controller"/>
+  <node pkg="asl_turtlebot" type="pose_controller.py" name="pose_controller" output="screen"/>
   
-  <node pkg="asl_turtlebot" type="navigator.py" name="navy_mcnav_face" />
+  <node pkg="asl_turtlebot" type="navigator.py" name="navy_mcnav_face" output="screen"/>
+
   <node name="rviz" pkg="rviz" type="rviz" args="-d $(find asl_turtlebot)/rviz/project_sim.rviz"/>
 </launch>

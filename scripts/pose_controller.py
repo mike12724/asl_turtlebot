@@ -8,6 +8,8 @@ import tf
 import numpy as np
 from numpy import linalg
 from utils import wrapToPi
+from utils import THETA_EPS, POS_EPS
+
 
 # control gains
 K1 = 0.4
@@ -124,7 +126,7 @@ class PoseController:
             th_rot = self.theta-self.theta_g 
             rho = linalg.norm(rel_coords) 
 
-            if (rho < 0.03) & (th_rot < 0.08):
+            if (rho < POS_EPS / 1.2) & (abs(th_rot) < THETA_EPS / 1.2):
                 rospy.loginfo("Close to goal: commanding zero controls")
                 self.x_g = None
                 self.y_g = None
