@@ -14,7 +14,7 @@ from copy import deepcopy
 # if using gmapping, you will have a map frame. otherwise it will be odom frame
 mapping = rospy.get_param("map")
 
-DIST_THRESHOLD = 1
+DIST_THRESHOLD = 0.5
 
 class obj_loc_broadcaster:
     def __init__(self):
@@ -49,14 +49,17 @@ class obj_loc_broadcaster:
 
         for i in range(self.map[obj_type]):
             #keep broadcasting to prevent loss of new (temp) frame
-            new_ps.header.stamp = self.trans.getLatestCommonTime(self.origin_frame, self.origin_frame)
-            ps = self.trans.transformPose('/'+obj_type+'_'+str(i), new_ps)
+		    while True:
+				try:
+					new_ps.header.stamp = self.trans.getLatestCommonTime(self.origin_frame, self.origin_frame)
+	            	ps = self.trans.transformPose('/'+obj_type+'_'+str(i), new_ps)
+	            	break
+
+	            except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
+	                rospy.loginfo(e)
+            
             trans = ps.pose.position
 
-            # self.br.sendTransform((posit.x,posit.y,posit.z),(ori.x, ori.y, ori.z, ori.w) , rospy.Time().now(), obj_frame_id, self.origin_frame)
-            # self.trans.waitForTransform('/'+obj_type+'_'+str(i), obj_frame_id, rospy.Time(), rospy.Duration(4.0))
-
-            # (trans,rot) = self.trans.lookupTransform('/'+obj_type+'_'+str(i), obj_frame_id, rospy.Time())
             dist = math.sqrt(trans.x**2 + trans.y**2)
             if dist < DIST_THRESHOLD: #already in map
                 in_map = True
