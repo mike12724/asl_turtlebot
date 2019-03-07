@@ -160,20 +160,6 @@ class Supervisor:
 
     def vel_callback(self,msg):
         self.V = msg.linear.x
-
-    def in_map(self, obj_type, x_loc, y_loc):
-        same_objects = self.map[obj_type]
-        if len(same_objects) == 0: #no objects of this type detected yet
-            return False
-
-        for location in same_objects:
-            x = location[0]
-            y = location[1]
-            if math.sqrt((x-x_loc)**2 + (y-y_loc)**2) < DETECT_EPS:
-                return True
-
-        return False
-
     
     def extract_object_location(self,msg):
         # pass TODO
@@ -271,35 +257,49 @@ class Supervisor:
         if self.mode == Mode.IDLE:
             self.mode = Mode.NAV
 
-    def detect_stop(self, data):
+    def detect_stop(self, sign_frame_id):
         """ callback for when the detector has found a stop sign. Note that
         a distance of 0 can mean that the lidar did not pickup the stop sign at all """
 
         # distance of the stop sign
-        stop_x = data[0]
-        stop_y = data[1]
-        stop_r = data[2]
-        stop_alph = data[3]
 
-        correct_side = (stop_r - self.x*math.cos(stop_alph) - self.y*math.sin(stop_alph)) > 0
-        correct_direction = (2*(self.V>0)-1)*self.theta
-        while correct_direction > math.pi:
-            correct_direction -= 2*math.pi
-        while correct_direction < -math.pi:
-            correct_direction += 2*math.pi
-        while stop_alph > math.pi:
-            stop_alph -= 2*math.pi
-        while stop_alph < -math.pi:
-            stop_alph += 2*math.pi
-        correct_direction = (abs(stop_alph - correct_direction) < math.pi/3) #traveling within 120 degrees of the stop sign
+        try:
+            t = self.trans_listener.getLatestCommonTime(sign_frame_id, '/base_footprint')
+            (dist_1,rot) = self.trans_listener.lookupTransform(sign_frame_id, '/base_footprint', t)
+            t.secs -= 1 #HYPER COARSE! GOING BACK A FULL SECOND!
+            (dist_2,rot) = self.trans_listener.lookupTransform(sign_frame_id, '/base_footprint', t)
 
-        dist = math.sqrt((self.x - stop_x)**2 \
-                    + (self.y - stop_y)**2)
+            rospy.loginfo((dist_1[0], dist_2[0], dist_1[0]- dist_2[0]))
+            if dist_2[0] > 0 and dist_2[0] < STOP_MIN_DIST and abs(dist_2[1]) < STOP_MIN_DIST and dist_2[0] - dist_1[0] > 0.1 and self.mode == Mode.NAV: #if in front of sign, and closer than 1 second ago (by some error margin)
+                self.init_stop_sign()
 
-        # if close enough and in nav mode, stop
-        if dist > 0 and dist < STOP_MIN_DIST and correct_direction and correct_side and self.mode == Mode.NAV:
-            self.stop_sign_loc = data
-            self.init_stop_sign()
+        except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
+            pass
+        
+        # stop_x = data[0]
+        # stop_y = data[1]
+        # stop_r = data[2]
+        # stop_alph = data[3]
+
+        # correct_side = (stop_r - self.x*math.cos(stop_alph) - self.y*math.sin(stop_alph)) > 0
+        # correct_direction = (2*(self.V>0)-1)*self.theta
+        # while correct_direction > math.pi:
+        #     correct_direction -= 2*math.pi
+        # while correct_direction < -math.pi:
+        #     correct_direction += 2*math.pi
+        # while stop_alph > math.pi:
+        #     stop_alph -= 2*math.pi
+        # while stop_alph < -math.pi:
+        #     stop_alph += 2*math.pi
+        # correct_direction = (abs(stop_alph - correct_direction) < math.pi/3) #traveling within 120 degrees of the stop sign
+
+        # dist = math.sqrt((self.x - stop_x)**2 \
+        #             + (self.y - stop_y)**2)
+
+        # # if close enough and in nav mode, stop
+        # if dist > 0 and dist < STOP_MIN_DIST and correct_direction and correct_side and self.mode == Mode.NAV:
+        #     self.stop_sign_loc = data
+        #     self.init_stop_sign()
 
 
     ############ your code starts here ############
@@ -411,11 +411,10 @@ class Supervisor:
             self.last_mode_printed = self.mode
 
         #rospy.loginfo(self.map)
-        for item, location in self.map.iteritems():
+        for frame in self.trans_listener.getFrameStrings():
             #Can add more if cases here for different results (for example, navigate around puddle)
-            if item == "stop_sign":
-                for pair in location:
-                    self.detect_stop(pair)
+            if "stop_sign" in frame: #ie stop_sign_1, stop_sign_2, etc
+                self.detect_stop(frame)
 
         # checks wich mode it is in and acts accordingly
         if self.mode == Mode.IDLE:
