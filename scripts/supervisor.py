@@ -1,17 +1,59 @@
 #!/usr/bin/env python
 
+"""
+Run this test as we ran the hw2 turtlebot sim with stop signs.
+1, make sure this node is compiled
+  (I copied to the asl_turtlebot version in my catkin workspace and then remade the catkin workspace)
+2, change the turtlebot3_signs_sim.launch file to use tensorflow: "use_tf" should be true.
+3, run the launch file:
+    roslaunch asl_turtlebot turtlebot3_signs_sim.launch
+4, run this node:
+    rosrun asl_turtlebot supervisor.py
+5, publish the goal:
+    rostopic pub /nav_pose geometry_msgs/Pose2D -- "4.0" "0.0" "0.0"
+6, echo the stop sign topic:
+    rostopic echo /detector/stop_sign
+You should see output like the below when approaching the stop sign:
+
+    ---
+    id: 2
+    name: "stop_sign"
+    confidence: 99
+    distance: 1.47614938021
+    thetaleft: 0.254595916957
+    thetaright: 0.19724214864
+    corners: [0.0, 0.0, 0.0, 0.0]
+    ---
+
+TODO: Make a new msg type (TrackedObject or some such) that makes better sense as the object
+the /estimator/stop_sign/. Currently I'm using DetectedObject, but that has a bunch of useless
+fields that I basically just filled with zeros. Also, ideally TrackedObject would have a boolean
+field storing whether the object is in front of our robot.
+
+NOTE GM: I acutally haven't used feature_mapper.py at all, but this works.
+
+MK: Edited the world file to have a stop sign at (2,1) and (5,-1). Do the following command to test:
+    rostopic pub /nav_pose geometry_msgs/Pose2D -- "7.0" "0.0" "0.0"
+
+"""
+
 import rospy
 from gazebo_msgs.msg import ModelStates
-from std_msgs.msg import Float32MultiArray, String
-from geometry_msgs.msg import Twist, PoseArray, Pose2D, PoseStamped
+from std_msgs.msg import Float32MultiArray, String, Header
+from geometry_msgs.msg import Twist, PoseArray, Pose2D, PoseStamped, Point, PointStamped
 from asl_turtlebot.msg import DetectedObject
 import tf
 import math
 from enum import Enum
+import detector # for loading object labels
+from collections import defaultdict 
 
 # if sim is True/using gazebo, therefore want to subscribe to /gazebo/model_states\
 # otherwise, they will use a TF lookup (hw2+)
 use_gazebo = rospy.get_param("sim")
+
+# how is nav_cmd being decided -- human manually setting it, or rviz
+rviz = rospy.get_param("rviz")
 
 # if using gmapping, you will have a map frame. otherwise it will be odom frame
 mapping = rospy.get_param("map")
@@ -21,11 +63,14 @@ mapping = rospy.get_param("map")
 POS_EPS = .1
 THETA_EPS = .3
 
+#threshold for considering two detected objects as the same
+DETECT_EPS = 0.3
+
 # time to stop at a stop sign
 STOP_TIME = 3
 
 # minimum distance from a stop sign to obey it
-STOP_MIN_DIST = .5
+STOP_MIN_DIST = 1.3
 
 # time taken to cross an intersection
 CROSSING_TIME = 3
@@ -42,6 +87,7 @@ class Mode(Enum):
 
 print "supervisor settings:\n"
 print "use_gazebo = %s\n" % use_gazebo
+print "rviz = %s\n" % rviz
 print "mapping = %s\n" % mapping
 
 class Supervisor:
@@ -49,30 +95,120 @@ class Supervisor:
     def __init__(self):
         rospy.init_node('turtlebot_supervisor', anonymous=True)
         # initialize variables
+
+        #Each entry in map is a list of tuples of locations of objects of that type
+        #map[name] = [(obj_1_x,obj_1_y), (obj_2_x, obj_2_y), (obj_3)...]
+        self.map = defaultdict(list) 
         self.x = 0
         self.y = 0
         self.theta = 0
+        self.V = 0
         self.mode = Mode.IDLE
         self.last_mode_printed = None
         self.trans_listener = tf.TransformListener()
         # command pose for controller
         self.pose_goal_publisher = rospy.Publisher('/cmd_pose', Pose2D, queue_size=10)
-        # nav pose for controller
-        self.nav_goal_publisher = rospy.Publisher('/cmd_nav', Pose2D, queue_size=10)
         # command vel (used for idling)
         self.cmd_vel_publisher = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
 
+
         # subscribers
         # stop sign detector
-        rospy.Subscriber('/detector/stop_sign', DetectedObject, self.stop_sign_detected_callback)
         # high-level navigation pose
         rospy.Subscriber('/nav_pose', Pose2D, self.nav_pose_callback)
+        rospy.Subscriber('/cmd_vel', Twist, self.vel_callback)
         # if using gazebo, we have access to perfect state
         if use_gazebo:
             rospy.Subscriber('/gazebo/model_states', ModelStates, self.gazebo_callback)
-        # we can subscribe to nav goal click
-        rospy.Subscriber('/move_base_simple/goal', PoseStamped, self.rviz_goal_callback)
+        # if using rviz, we can subscribe to nav goal click
+        if rviz:
+            rospy.Subscriber('/move_base_simple/goal', PoseStamped, self.rviz_goal_callback)
         
+        # Need to load the list of all object labels
+        self.dict_of_all_obj_labels = detector.load_object_labels(detector.PATH_TO_LABELS)
+
+        self.detected_object = None
+        for class_label in self.dict_of_all_obj_labels.values():
+            # Here, we can pick which labels we want a subscriber for. 
+            # Check out the COCO dataset if you want to know which are options.
+            if class_label != "stop_sign": continue
+            print("INFO: creating subscriber for: {}".format(class_label))
+            rospy.Subscriber(
+                '/detector/'+class_label, 
+                DetectedObject, 
+                self.extract_object_location)
+	
+    # NOTE GM -- CURRENTLY NOT USING THIS
+    # def image_callback(self,msg):
+    #     #detector and detector_mobilenet use tf graphs
+    #     # see scripts/detector.py:230 for details of the message, it is a DetectedObject
+    #     obj_bounding_box = msg.corners
+    #     #[ymin, xmin, ymax, xmax] = obj_bounding_box
+    #     obj_id = msg.id
+    #     obj_label = msg.name # the human readable class name
+    #     obj_score = msg.confidence # how confident are we in the classification
+    #     obj_dist = msg.distance
+    #     obj_theta_left = msg.thetaleft
+    #     obj_theta_right = msg.thetaright
+    #     self.detected_object = msg
+    #     self.extract_object_location(msg)
+    #     # TODO: is this really all we need?
+
+    #     #And subscribe to them, then get the bounding box, and object label
+    #     #self.detected_object = (bb, label)
+    #     #Could probably run extract_object_location from here
+
+    def vel_callback(self,msg):
+        self.V = msg.linear.x
+
+    def in_map(self, obj_type, x_loc, y_loc):
+        same_objects = self.map[obj_type]
+        if len(same_objects) == 0: #no objects of this type detected yet
+            return False
+
+        for location in same_objects:
+            x = location[0]
+            y = location[1]
+            if math.sqrt((x-x_loc)**2 + (y-y_loc)**2) < DETECT_EPS:
+                return True
+
+        return False
+
+    
+    def extract_object_location(self,msg):
+        # pass TODO
+        #use self.detected_object, self.lidar_list, and tf transforms to 
+        #figure out where self.detected_object is in terms of the map frame
+        #self.map.append((x_location, y_location, object label)) 
+        #may need an additional transform b/w base_footprint and camera (if camera not on center of robot)
+            #need to see what tfs available in rviz when running gmapping_sim.launch for example
+
+        #Ideally, we can also skip over duplicates - if we've put something into self.map already, no need to process it again
+
+        [ymin, xmin, ymax, xmax] = msg.corners
+        yc, xc         = 0.5*(ymin + ymax), 0.5*(xmin + xmax)
+        th_r, th_l     = msg.thetaright, msg.thetaleft
+
+        # Switch from [0,2pi] wrap to [-pi, pi]
+        if th_r > math.pi:
+            th_r = th_r - 2*math.pi
+        if th_l > math.pi:
+            th_l = th_l - 2*math.pi
+        th_c = 0.5*(th_r + th_l) # THIS IS AN APPROX
+        dist = msg.distance
+        x_from_cam = dist * math.cos(th_c)
+        y_from_cam = dist * math.sin(th_c)
+
+        x_bot, y_bot, th_bot = self.x,self.y,self.theta
+
+        x_loc = (x_from_cam * math.cos(th_bot) - y_from_cam * math.sin(th_bot)) + x_bot
+        y_loc = (x_from_cam * math.sin(th_bot) + y_from_cam * math.cos(th_bot)) + y_bot
+
+        r_loc = math.sqrt(x_loc**2 + y_loc**2)
+
+        if (dist > 0.0 and not self.in_map(msg.name, x_loc,y_loc)):
+            self.map[msg.name].append((x_loc,y_loc, r_loc, th_bot+th_c)) #r, alpha of sign in world coords
+
     def gazebo_callback(self, msg):
         pose = msg.pose[msg.name.index("turtlebot3_burger")]
         twist = msg.twist[msg.name.index("turtlebot3_burger")]
@@ -110,18 +246,44 @@ class Supervisor:
         self.x_g = msg.x
         self.y_g = msg.y
         self.theta_g = msg.theta
-        self.mode = Mode.NAV
+        if self.mode == Mode.IDLE:
+        	self.mode = Mode.NAV
 
-    def stop_sign_detected_callback(self, msg):
+    def detect_stop(self, data):
         """ callback for when the detector has found a stop sign. Note that
         a distance of 0 can mean that the lidar did not pickup the stop sign at all """
 
         # distance of the stop sign
-        dist = msg.distance
+        stop_x = data[0]
+        stop_y = data[1]
+        stop_r = data[2]
+        stop_alph = data[3]
+
+        correct_side = (stop_r - self.x*math.cos(stop_alph) - self.y*math.sin(stop_alph)) > 0
+        correct_direction = (2*(self.V>0)-1)*self.theta
+        while correct_direction > math.pi:
+            correct_direction -= 2*math.pi
+        while correct_direction < -math.pi:
+            correct_direction += 2*math.pi
+        while stop_alph > math.pi:
+            stop_alph -= 2*math.pi
+        while stop_alph < -math.pi:
+            stop_alph += 2*math.pi
+        correct_direction = (abs(stop_alph - correct_direction) < math.pi/3) #traveling within 120 degrees of the stop sign
+
+        dist = math.sqrt((self.x - stop_x)**2 \
+                    + (self.y - stop_y)**2)
 
         # if close enough and in nav mode, stop
-        if dist > 0 and dist < STOP_MIN_DIST and self.mode == Mode.NAV:
+        if dist > 0 and dist < STOP_MIN_DIST and correct_direction and correct_side and self.mode == Mode.NAV:
             self.init_stop_sign()
+
+
+    ############ your code starts here ############
+    # feel free to change the code here 
+    # you may or may not find these functions useful
+    # there is no "one answer"
+
 
     def go_to_pose(self):
         """ sends the current desired pose to the pose controller """
@@ -141,7 +303,7 @@ class Supervisor:
         nav_g_msg.y = self.y_g
         nav_g_msg.theta = self.theta_g
 
-        self.nav_goal_publisher.publish(nav_g_msg)
+        self.pose_goal_publisher.publish(nav_g_msg)
 
     def stay_idle(self):
         """ sends zero velocity to stay put """
@@ -181,6 +343,25 @@ class Supervisor:
         mode (i.e. the finite state machine's state), if takes appropriate
         actions. This function shouldn't return anything """
 
+        TESTING = False
+
+        if TESTING:
+            target = "stop_sign"
+            if target in self.map:
+                # TESTING
+                estimator_msg = DetectedObject()
+                estimator_msg.id = 22
+                estimator_msg.name = "stop_sign"
+                estimator_msg.confidence = 99
+                estimator_msg.distance = math.sqrt((self.x - self.map[target][0][0])**2 \
+                    + (self.y - self.map[target][0][1])**2)
+                estimator_msg.thetaleft = self.map[target][0][0]
+                estimator_msg.thetaright = self.map[target][0][1]
+                estimator_msg.corners = [0, 0, 0, 0]#[dist, x_from_cam, y_from_cam, th_c]
+                self.location_publisher.publish(estimator_msg)
+
+        #################################################################################
+        # Do not change this for hw2 -- this won't affect your FSM since you are using gazebo
         if not use_gazebo:
             try:
                 origin_frame = "/map" if mapping else "/odom"
@@ -191,6 +372,17 @@ class Supervisor:
                 self.theta = euler[2]
             except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
                 pass
+        #################################################################################
+
+    # YOUR STATE MACHINE
+    # Currently it will just go to the pose without stopping at the stop sign
+
+        #rospy.loginfo(self.map)
+        for item, location in self.map.iteritems():
+            #Can add more if cases here for different results (for example, navigate around puddle)
+            if item == "stop_sign":
+                for pair in location:
+                    self.detect_stop(pair)
 
         # logs the current mode
         if not(self.last_mode_printed == self.mode):
@@ -210,18 +402,15 @@ class Supervisor:
                 self.go_to_pose()
 
         elif self.mode == Mode.STOP:
-            # at a stop sign
-            if self.has_stopped():
-                self.init_crossing()
-            else:
-                self.stay_idle()
+            while not self.has_stopped():
+            	self.stay_idle()
+            self.init_crossing()
 
         elif self.mode == Mode.CROSS:
             # crossing an intersection
-            if self.has_crossed():
-                self.mode = Mode.NAV
-            else:
-                self.nav_to_pose()
+            while not self.has_crossed():
+            	self.nav_to_pose()
+            self.mode = Mode.NAV
 
         elif self.mode == Mode.NAV:
             if self.close_to(self.x_g,self.y_g,self.theta_g):
@@ -232,6 +421,8 @@ class Supervisor:
         else:
             raise Exception('This mode is not supported: %s'
                 % str(self.mode))
+
+    ############ your code ends here ############
 
     def run(self):
         rate = rospy.Rate(10) # 10 Hz
