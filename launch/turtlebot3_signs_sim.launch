@@ -6,7 +6,7 @@
     <arg name="gui" default="false"/>
     <rosparam param="sim">true</rosparam>
     <rosparam param="map">false</rosparam>
-    <rosparam param="use_tf">tf</rosparam>
+    <rosparam param="use_tf">true</rosparam>
     <rosparam param="rviz">true</rosparam>
 
     <include file="$(find gazebo_ros)/launch/empty_world.launch">

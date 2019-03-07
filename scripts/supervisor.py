@@ -25,10 +25,7 @@ You should see output like the below when approaching the stop sign:
     corners: [0.0, 0.0, 0.0, 0.0]
     ---
 
-TODO: Make a new msg type (TrackedObject or some such) that makes better sense as the object
-the /estimator/stop_sign/. Currently I'm using DetectedObject, but that has a bunch of useless
-fields that I basically just filled with zeros. Also, ideally TrackedObject would have a boolean
-field storing whether the object is in front of our robot.
+TODO: Integrate LIDAR data into our extract_location function!
 
 NOTE GM: I acutally haven't used feature_mapper.py at all, but this works.
 
@@ -111,6 +108,8 @@ class Supervisor:
         self.pose_goal_publisher = rospy.Publisher('/cmd_pose', Pose2D, queue_size=10)
         # command vel (used for idling)
         self.cmd_vel_publisher = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
+        # publish to obj_loc_broadcaster
+        self.obj_loc_publisher = rospy.Publisher('/supervisor/object_position', PoseStamped, queue_size=10)
 
 
         # subscribers
@@ -186,8 +185,8 @@ class Supervisor:
 
         #Ideally, we can also skip over duplicates - if we've put something into self.map already, no need to process it again
 
-        [ymin, xmin, ymax, xmax] = msg.corners
-        yc, xc         = 0.5*(ymin + ymax), 0.5*(xmin + xmax)
+        # [ymin, xmin, ymax, xmax] = msg.corners
+        # yc, xc         = 0.5*(ymin + ymax), 0.5*(xmin + xmax)
         th_r, th_l     = msg.thetaright, msg.thetaleft
 
         # Switch from [0,2pi] wrap to [-pi, pi]
@@ -196,19 +195,41 @@ class Supervisor:
         if th_l > math.pi:
             th_l = th_l - 2*math.pi
         th_c = 0.5*(th_r + th_l) # THIS IS AN APPROX
-        dist = msg.distance
+
+        dist = msg.distance #FIXME WITH LIDAR
         x_from_cam = dist * math.cos(th_c)
         y_from_cam = dist * math.sin(th_c)
+        theta_from_cam = math.pi+self.theta #assume sign is directly facing us
 
-        x_bot, y_bot, th_bot = self.x,self.y,self.theta
+        if dist > 0.0:
+            pose = PoseStamped()
+            pose.header.stamp = rospy.Time(0)
 
-        x_loc = (x_from_cam * math.cos(th_bot) - y_from_cam * math.sin(th_bot)) + x_bot
-        y_loc = (x_from_cam * math.sin(th_bot) + y_from_cam * math.cos(th_bot)) + y_bot
+            #detected relative to robot, Also need msg.name to figure out what type it is
+            pose.header.frame_id = '/base_footprint/'+msg.name 
+            pose.pose.position.x = x_from_cam
+            pose.pose.position.y = y_from_cam
+            pose.pose.position.z = 0.0
 
-        r_loc = math.sqrt(x_loc**2 + y_loc**2)
+            quaternion = tf.transformations.quaternion_from_euler(0, 0, theta_from_cam)
+            pose.pose.orientation.x = quaternion[0]
+            pose.pose.orientation.y = quaternion[1]
+            pose.pose.orientation.z = quaternion[2]
+            pose.pose.orientation.w = quaternion[3]
 
-        if (dist > 0.0 and not self.in_map(msg.name, x_loc,y_loc)):
-            self.map[msg.name].append((x_loc,y_loc, r_loc, th_bot+th_c)) #r, alpha of sign in world coords
+            self.obj_loc_publisher.publish(pose)
+
+        # x_bot, y_bot, th_bot = self.x,self.y,self.theta
+
+        # x_loc = (x_from_cam * math.cos(th_bot) - y_from_cam * math.sin(th_bot)) + x_bot
+        # y_loc = (x_from_cam * math.sin(th_bot) + y_from_cam * math.cos(th_bot)) + y_bot
+
+        # r_loc = math.sqrt(x_loc**2 + y_loc**2)
+
+
+
+        # if (dist > 0.0 and not self.in_map(msg.name, x_loc,y_loc)):
+        #     self.map[msg.name].append((x_loc,y_loc, r_loc, th_bot+th_c)) #r, alpha of sign in world coords
 
     def gazebo_callback(self, msg):
         pose = msg.pose[msg.name.index("turtlebot3_burger")]
@@ -384,9 +405,6 @@ class Supervisor:
     # YOUR STATE MACHINE
     # Currently it will just go to the pose without stopping at the stop sign
 
-        if self.close_to(self.x_g,self.y_g,self.theta_g):
-            self.mode = Mode.IDLE
-
         # logs the current mode
         if not(self.last_mode_printed == self.mode):
             rospy.loginfo("Current Mode: %s", self.mode)
@@ -412,12 +430,16 @@ class Supervisor:
                 self.go_to_pose()
 
         elif self.mode == Mode.STOP:
+            if self.close_to(self.x_g,self.y_g,self.theta_g):
+                self.mode = Mode.IDLE
             while not self.has_stopped():
                 self.stay_idle()
             self.init_crossing()
 
         elif self.mode == Mode.CROSS:
             # crossing an intersection
+            if self.close_to(self.x_g,self.y_g,self.theta_g):
+                self.mode = Mode.IDLE
             while not self.has_crossed():
                 self.nav_to_pose()
             self.mode = Mode.NAV
