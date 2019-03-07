@@ -105,6 +105,7 @@ class Supervisor:
         self.V = 0
         self.mode = Mode.IDLE
         self.last_mode_printed = None
+        self.stop_sign_loc = None #for checking if we've successfully crossed
         self.trans_listener = tf.TransformListener()
         # command pose for controller
         self.pose_goal_publisher = rospy.Publisher('/cmd_pose', Pose2D, queue_size=10)
@@ -137,7 +138,7 @@ class Supervisor:
                 '/detector/'+class_label, 
                 DetectedObject, 
                 self.extract_object_location)
-	
+    
     # NOTE GM -- CURRENTLY NOT USING THIS
     # def image_callback(self,msg):
     #     #detector and detector_mobilenet use tf graphs
@@ -247,7 +248,7 @@ class Supervisor:
         self.y_g = msg.y
         self.theta_g = msg.theta
         if self.mode == Mode.IDLE:
-        	self.mode = Mode.NAV
+            self.mode = Mode.NAV
 
     def detect_stop(self, data):
         """ callback for when the detector has found a stop sign. Note that
@@ -276,6 +277,7 @@ class Supervisor:
 
         # if close enough and in nav mode, stop
         if dist > 0 and dist < STOP_MIN_DIST and correct_direction and correct_side and self.mode == Mode.NAV:
+            self.stop_sign_loc = data
             self.init_stop_sign()
 
 
@@ -335,8 +337,13 @@ class Supervisor:
 
     def has_crossed(self):
         """ checks if crossing maneuver is over """
-
-        return (self.mode == Mode.CROSS and (rospy.get_rostime()-self.cross_start)>rospy.Duration.from_sec(CROSSING_TIME))
+        stop_x = self.stop_sign_loc[0]
+        stop_y = self.stop_sign_loc[1]
+        stop_r = self.stop_sign_loc[2]
+        stop_alph = self.stop_sign_loc[3]
+        dist = math.sqrt((self.x - stop_x)**2 + (self.y - stop_y)**2)
+        correct_side = (stop_r - self.x*math.cos(stop_alph) - self.y*math.sin(stop_alph)) > 0
+        return (self.mode == Mode.CROSS and (dist > STOP_MIN_DIST or not correct_side))
 
     def loop(self):
         """ the main loop of the robot. At each iteration, depending on its
@@ -377,17 +384,20 @@ class Supervisor:
     # YOUR STATE MACHINE
     # Currently it will just go to the pose without stopping at the stop sign
 
+        if self.close_to(self.x_g,self.y_g,self.theta_g):
+            self.mode = Mode.IDLE
+
+        # logs the current mode
+        if not(self.last_mode_printed == self.mode):
+            rospy.loginfo("Current Mode: %s", self.mode)
+            self.last_mode_printed = self.mode
+
         #rospy.loginfo(self.map)
         for item, location in self.map.iteritems():
             #Can add more if cases here for different results (for example, navigate around puddle)
             if item == "stop_sign":
                 for pair in location:
                     self.detect_stop(pair)
-
-        # logs the current mode
-        if not(self.last_mode_printed == self.mode):
-            rospy.loginfo("Current Mode: %s", self.mode)
-            self.last_mode_printed = self.mode
 
         # checks wich mode it is in and acts accordingly
         if self.mode == Mode.IDLE:
@@ -403,13 +413,13 @@ class Supervisor:
 
         elif self.mode == Mode.STOP:
             while not self.has_stopped():
-            	self.stay_idle()
+                self.stay_idle()
             self.init_crossing()
 
         elif self.mode == Mode.CROSS:
             # crossing an intersection
             while not self.has_crossed():
-            	self.nav_to_pose()
+                self.nav_to_pose()
             self.mode = Mode.NAV
 
         elif self.mode == Mode.NAV:
