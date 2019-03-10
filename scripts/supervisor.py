@@ -257,25 +257,34 @@ class Supervisor:
         if self.mode == Mode.IDLE:
             self.mode = Mode.NAV
 
-    def detect_stop(self, sign_frame_id):
-        """ callback for when the detector has found a stop sign. Note that
-        a distance of 0 can mean that the lidar did not pickup the stop sign at all """
-
-        # distance of the stop sign
-
+    def within_range_of_stop(self, sign_frame_id):
         try:
             t = self.trans_listener.getLatestCommonTime(sign_frame_id, '/base_footprint')
             (dist_1,rot) = self.trans_listener.lookupTransform(sign_frame_id, '/base_footprint', t)
             t.secs -= 1 #HYPER COARSE! GOING BACK A FULL SECOND!
             (dist_2,rot) = self.trans_listener.lookupTransform(sign_frame_id, '/base_footprint', t)
 
-            rospy.loginfo((dist_1[0], dist_2[0], dist_1[0]- dist_2[0]))
-            if dist_2[0] > 0 and dist_2[0] < STOP_MIN_DIST and abs(dist_2[1]) < STOP_MIN_DIST and dist_2[0] - dist_1[0] > 0.1 and self.mode == Mode.NAV: #if in front of sign, and closer than 1 second ago (by some error margin)
-                self.init_stop_sign()
+            #rospy.loginfo((dist_1[0], dist_2[0], dist_1[0]- dist_2[0]))
+            if dist_1[0] > 0 and dist_1[0] < STOP_MIN_DIST and abs(dist_1[1]) < STOP_MIN_DIST:
+                return [True, dist_2[0] - dist_1[0] > 0.1]
+            else:
+                return [False, dist_2[0] - dist_1[0] > 0.1]
 
         except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
-            pass
-        
+            return [-1]
+
+
+    def detect_stop(self, sign_frame_id):
+        """ callback for when the detector has found a stop sign. Note that
+        a distance of 0 can mean that the lidar did not pickup the stop sign at all """
+
+        # distance of the stop sign
+        win = self.within_range_of_stop(sign_frame_id)
+        rospy.loginfo(win)
+        if win[0] == -1: pass
+
+        if win[0] and win[1] and self.mode == Mode.NAV: #if in front of sign, and closer than 1 second ago (by some error margin)
+                self.init_stop_sign(sign_frame_id)
         # stop_x = data[0]
         # stop_y = data[1]
         # stop_r = data[2]
@@ -339,9 +348,11 @@ class Supervisor:
 
         return (abs(x-self.x)<POS_EPS and abs(y-self.y)<POS_EPS and abs(theta-self.theta)<THETA_EPS)
 
-    def init_stop_sign(self):
+    def init_stop_sign(self, sign_frame_id):
         """ initiates a stop sign maneuver """
 
+        #self.stop_sign_start = rospy.get_rostime()
+        self.crossing_sign = sign_frame_id
         self.stop_sign_start = rospy.get_rostime()
         self.mode = Mode.STOP
 
@@ -358,13 +369,15 @@ class Supervisor:
 
     def has_crossed(self):
         """ checks if crossing maneuver is over """
-        stop_x = self.stop_sign_loc[0]
-        stop_y = self.stop_sign_loc[1]
-        stop_r = self.stop_sign_loc[2]
-        stop_alph = self.stop_sign_loc[3]
-        dist = math.sqrt((self.x - stop_x)**2 + (self.y - stop_y)**2)
-        correct_side = (stop_r - self.x*math.cos(stop_alph) - self.y*math.sin(stop_alph)) > 0
-        return (self.mode == Mode.CROSS and (dist > STOP_MIN_DIST or not correct_side))
+        # stop_x = self.stop_sign_loc[0]
+        # stop_y = self.stop_sign_loc[1]
+        # stop_r = self.stop_sign_loc[2]
+        # stop_alph = self.stop_sign_loc[3]
+        # dist = math.sqrt((self.x - stop_x)**2 + (self.y - stop_y)**2)
+        # correct_side = (stop_r - self.x*math.cos(stop_alph) - self.y*math.sin(stop_alph)) > 0
+        within = self.within_range_of_stop(self.crossing_sign)
+        if within[0] == -1: return False
+        return (self.mode == Mode.CROSS and not within[0])
 
     def loop(self):
         """ the main loop of the robot. At each iteration, depending on its
@@ -411,10 +424,6 @@ class Supervisor:
             self.last_mode_printed = self.mode
 
         #rospy.loginfo(self.map)
-        for frame in self.trans_listener.getFrameStrings():
-            #Can add more if cases here for different results (for example, navigate around puddle)
-            if "stop_sign" in frame: #ie stop_sign_1, stop_sign_2, etc
-                self.detect_stop(frame)
 
         # checks wich mode it is in and acts accordingly
         if self.mode == Mode.IDLE:
@@ -429,24 +438,29 @@ class Supervisor:
                 self.go_to_pose()
 
         elif self.mode == Mode.STOP:
-            if self.close_to(self.x_g,self.y_g,self.theta_g):
-                self.mode = Mode.IDLE
             while not self.has_stopped():
                 self.stay_idle()
-            self.init_crossing()
+            if self.close_to(self.x_g,self.y_g,self.theta_g):
+                self.mode = Mode.IDLE
+            else:
+                self.init_crossing()
 
         elif self.mode == Mode.CROSS:
             # crossing an intersection
-            if self.close_to(self.x_g,self.y_g,self.theta_g):
-                self.mode = Mode.IDLE
             while not self.has_crossed():
                 self.nav_to_pose()
+                if self.close_to(self.x_g,self.y_g,self.theta_g):
+                    self.mode = Mode.IDLE
             self.mode = Mode.NAV
 
         elif self.mode == Mode.NAV:
             if self.close_to(self.x_g,self.y_g,self.theta_g):
                 self.mode = Mode.IDLE
             else:
+                for frame in self.trans_listener.getFrameStrings():
+                    #Can add more if cases here for different results (for example, navigate around puddle)
+                    if "stop_sign" in frame: #ie stop_sign_1, stop_sign_2, etc
+                        self.detect_stop(frame)
                 self.nav_to_pose()
 
         else:

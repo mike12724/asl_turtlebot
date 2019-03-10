@@ -49,11 +49,15 @@ class obj_loc_broadcaster:
 
         for i in range(self.map[obj_type]):
             #keep broadcasting to prevent loss of new (temp) frame
-            self.br.sendTransform((posit.x,posit.y,posit.z),(ori.x, ori.y, ori.z, ori.w) , rospy.Time().now(), obj_frame_id, self.origin_frame)
-            self.trans.waitForTransform('/'+obj_type+'_'+str(i), obj_frame_id, rospy.Time(), rospy.Duration(4.0))
+            new_ps.header.stamp = self.trans.getLatestCommonTime(self.origin_frame, self.origin_frame)
+            ps = self.trans.transformPose('/'+obj_type+'_'+str(i), new_ps)
+            trans = ps.pose.position
 
-            (trans,rot) = self.trans.lookupTransform('/'+obj_type+'_'+str(i), obj_frame_id, rospy.Time())
-            dist = math.sqrt(trans[0]**2 + trans[1]**2)
+            # self.br.sendTransform((posit.x,posit.y,posit.z),(ori.x, ori.y, ori.z, ori.w) , rospy.Time().now(), obj_frame_id, self.origin_frame)
+            # self.trans.waitForTransform('/'+obj_type+'_'+str(i), obj_frame_id, rospy.Time(), rospy.Duration(4.0))
+
+            # (trans,rot) = self.trans.lookupTransform('/'+obj_type+'_'+str(i), obj_frame_id, rospy.Time())
+            dist = math.sqrt(trans.x**2 + trans.y**2)
             if dist < DIST_THRESHOLD: #already in map
                 in_map = True
                 break
