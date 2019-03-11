@@ -260,18 +260,17 @@ class Supervisor:
     def within_range_of_stop(self, sign_frame_id):
         try:
             t = self.trans_listener.getLatestCommonTime(sign_frame_id, '/base_footprint')
-            (dist_1,rot) = self.trans_listener.lookupTransform(sign_frame_id, '/base_footprint', t)
-            t.secs -= 1 #HYPER COARSE! GOING BACK A FULL SECOND!
-            (dist_2,rot) = self.trans_listener.lookupTransform(sign_frame_id, '/base_footprint', t)
-
+            #self.trans_listener.waitForTransform(sign_frame_id, '/base_footprint', rospy.Time().now(), rospy.Duration(4.0))
+            (dist_1,rot) = self.trans_listener.lookupTransform(sign_frame_id, '/base_footprint', rospy.Time()) 
             #rospy.loginfo((dist_1[0], dist_2[0], dist_1[0]- dist_2[0]))
             if dist_1[0] > 0 and dist_1[0] < STOP_MIN_DIST and abs(dist_1[1]) < STOP_MIN_DIST:
-                return [True, dist_2[0] - dist_1[0] > 0.1]
+                return True
             else:
-                return [False, dist_2[0] - dist_1[0] > 0.1]
+                return False
 
-        except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
-            return [-1]
+        except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
+            rospy.loginfo(e)
+            return -1
 
 
     def detect_stop(self, sign_frame_id):
@@ -280,10 +279,9 @@ class Supervisor:
 
         # distance of the stop sign
         win = self.within_range_of_stop(sign_frame_id)
-        rospy.loginfo(win)
-        if win[0] == -1: pass
+        if win == -1: return
 
-        if win[0] and win[1] and self.mode == Mode.NAV: #if in front of sign, and closer than 1 second ago (by some error margin)
+        if win and self.mode == Mode.NAV: #if in front of sign, and closer than 1 second ago (by some error margin)
                 self.init_stop_sign(sign_frame_id)
         # stop_x = data[0]
         # stop_y = data[1]
@@ -376,8 +374,8 @@ class Supervisor:
         # dist = math.sqrt((self.x - stop_x)**2 + (self.y - stop_y)**2)
         # correct_side = (stop_r - self.x*math.cos(stop_alph) - self.y*math.sin(stop_alph)) > 0
         within = self.within_range_of_stop(self.crossing_sign)
-        if within[0] == -1: return False
-        return (self.mode == Mode.CROSS and not within[0])
+        if within == -1: return False
+        return (self.mode == Mode.CROSS and not within)
 
     def loop(self):
         """ the main loop of the robot. At each iteration, depending on its
@@ -428,6 +426,10 @@ class Supervisor:
         # checks wich mode it is in and acts accordingly
         if self.mode == Mode.IDLE:
             # send zero velocity
+            for frame in self.trans_listener.getFrameStrings():
+                #Can add more if cases here for different results (for example, navigate around puddle)
+                if "stop_sign" in frame: #ie stop_sign_1, stop_sign_2, etc
+                    self.detect_stop(frame)
             self.stay_idle()
 
         elif self.mode == Mode.POSE:
@@ -451,7 +453,7 @@ class Supervisor:
                 self.nav_to_pose()
                 if self.close_to(self.x_g,self.y_g,self.theta_g):
                     self.mode = Mode.IDLE
-            self.mode = Mode.NAV
+            self.mode = Mode.NAV if not self.mode==Mode.IDLE
 
         elif self.mode == Mode.NAV:
             if self.close_to(self.x_g,self.y_g,self.theta_g):

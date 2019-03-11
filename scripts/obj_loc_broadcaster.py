@@ -18,7 +18,7 @@ DIST_THRESHOLD = 1
 
 class obj_loc_broadcaster:
     def __init__(self):
-        rospy.init_node('object_position_broadcaster')
+        rospy.init_node('object_position_broadcaster', anonymous=True)
         rospy.Subscriber('/supervisor/object_position', PoseStamped, self.add_new_tf)
         self.trans =  tf.TransformListener()        
         self.br = tf.TransformBroadcaster()
@@ -79,7 +79,7 @@ class obj_loc_broadcaster:
         self.rate = rospy.Rate(10)
         while not rospy.is_shutdown():
             for item in self.br_data:
-                self.br.sendTransform(item[0], item[1], rospy.Time.now(), item[2], item[3])
+                self.br.sendTransform(item[0], item[1], rospy.Time().now(), item[2], item[3])
             self.rate.sleep()
 
 if __name__ == '__main__':
