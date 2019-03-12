@@ -395,6 +395,7 @@ class Supervisor:
                 self.nav_to_pose()
                 if self.close_to(self.x_g,self.y_g,self.theta_g):
                     self.mode = Mode.IDLE
+                    break
                     
             if not self.mode==Mode.IDLE:
                 self.mode = Mode.NAV 
