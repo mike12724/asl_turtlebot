@@ -1,36 +1,10 @@
 #!/usr/bin/env python
 
 """
-Run this test as we ran the hw2 turtlebot sim with stop signs.
-1, make sure this node is compiled
-  (I copied to the asl_turtlebot version in my catkin workspace and then remade the catkin workspace)
-2, change the turtlebot3_signs_sim.launch file to use tensorflow: "use_tf" should be true.
-3, run the launch file:
-    roslaunch asl_turtlebot turtlebot3_signs_sim.launch
-4, run this node:
-    rosrun asl_turtlebot supervisor.py
-5, publish the goal:
-    rostopic pub /nav_pose geometry_msgs/Pose2D -- "4.0" "0.0" "0.0"
-6, echo the stop sign topic:
-    rostopic echo /detector/stop_sign
-You should see output like the below when approaching the stop sign:
-
-    ---
-    id: 2
-    name: "stop_sign"
-    confidence: 99
-    distance: 1.47614938021
-    thetaleft: 0.254595916957
-    thetaright: 0.19724214864
-    corners: [0.0, 0.0, 0.0, 0.0]
-    ---
 
 TODO: Integrate LIDAR data into our extract_location function!
+Actually detect fruits; fix supervisor to detect all the things in the coco file
 
-NOTE GM: I acutally haven't used feature_mapper.py at all, but this works.
-
-MK: Edited the world file to have a stop sign at (2,1) and (5,-1). Do the following command to test:
-    rostopic pub /nav_pose geometry_msgs/Pose2D -- "7.0" "0.0" "0.0"
 
 """
 
@@ -103,8 +77,16 @@ class Supervisor:
         self.mode = Mode.IDLE
         self.last_mode_printed = None
         self.stop_sign_loc = None #for checking if we've successfully crossed
+        self.delivery_targets = [] #list of objects we need to nav to
         self.trans_listener = tf.TransformListener()
         # command pose for controller
+
+
+
+
+
+
+        #publish to cmd_nav instead to use navigator.py!!!!
         self.pose_goal_publisher = rospy.Publisher('/cmd_pose', Pose2D, queue_size=10)
         # command vel (used for idling)
         self.cmd_vel_publisher = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
@@ -117,6 +99,7 @@ class Supervisor:
         # high-level navigation pose
         rospy.Subscriber('/nav_pose', Pose2D, self.nav_pose_callback)
         rospy.Subscriber('/cmd_vel', Twist, self.vel_callback)
+        rospy.Subscriber('/delivery_request', String, self.delivery_callback)
         # if using gazebo, we have access to perfect state
         if use_gazebo:
             rospy.Subscriber('/gazebo/model_states', ModelStates, self.gazebo_callback)
@@ -137,42 +120,11 @@ class Supervisor:
                 '/detector/'+class_label, 
                 DetectedObject, 
                 self.extract_object_location)
-    
-    # NOTE GM -- CURRENTLY NOT USING THIS
-    # def image_callback(self,msg):
-    #     #detector and detector_mobilenet use tf graphs
-    #     # see scripts/detector.py:230 for details of the message, it is a DetectedObject
-    #     obj_bounding_box = msg.corners
-    #     #[ymin, xmin, ymax, xmax] = obj_bounding_box
-    #     obj_id = msg.id
-    #     obj_label = msg.name # the human readable class name
-    #     obj_score = msg.confidence # how confident are we in the classification
-    #     obj_dist = msg.distance
-    #     obj_theta_left = msg.thetaleft
-    #     obj_theta_right = msg.thetaright
-    #     self.detected_object = msg
-    #     self.extract_object_location(msg)
-    #     # TODO: is this really all we need?
-
-    #     #And subscribe to them, then get the bounding box, and object label
-    #     #self.detected_object = (bb, label)
-    #     #Could probably run extract_object_location from here
 
     def vel_callback(self,msg):
         self.V = msg.linear.x
     
     def extract_object_location(self,msg):
-        # pass TODO
-        #use self.detected_object, self.lidar_list, and tf transforms to 
-        #figure out where self.detected_object is in terms of the map frame
-        #self.map.append((x_location, y_location, object label)) 
-        #may need an additional transform b/w base_footprint and camera (if camera not on center of robot)
-            #need to see what tfs available in rviz when running gmapping_sim.launch for example
-
-        #Ideally, we can also skip over duplicates - if we've put something into self.map already, no need to process it again
-
-        # [ymin, xmin, ymax, xmax] = msg.corners
-        # yc, xc         = 0.5*(ymin + ymax), 0.5*(xmin + xmax)
         th_r, th_l     = msg.thetaright, msg.thetaleft
 
         # Switch from [0,2pi] wrap to [-pi, pi]
@@ -191,7 +143,7 @@ class Supervisor:
             pose = PoseStamped()
             pose.header.stamp = rospy.Time(0)
 
-            #detected relative to robot, Also need msg.name to figure out what type it is
+            #detected relative to robot, Also need msg.name to figure out what type of object it is
             pose.header.frame_id = '/base_footprint/'+msg.name 
             pose.pose.position.x = x_from_cam
             pose.pose.position.y = y_from_cam
@@ -204,18 +156,6 @@ class Supervisor:
             pose.pose.orientation.w = quaternion[3]
 
             self.obj_loc_publisher.publish(pose)
-
-        # x_bot, y_bot, th_bot = self.x,self.y,self.theta
-
-        # x_loc = (x_from_cam * math.cos(th_bot) - y_from_cam * math.sin(th_bot)) + x_bot
-        # y_loc = (x_from_cam * math.sin(th_bot) + y_from_cam * math.cos(th_bot)) + y_bot
-
-        # r_loc = math.sqrt(x_loc**2 + y_loc**2)
-
-
-
-        # if (dist > 0.0 and not self.in_map(msg.name, x_loc,y_loc)):
-        #     self.map[msg.name].append((x_loc,y_loc, r_loc, th_bot+th_c)) #r, alpha of sign in world coords
 
     def gazebo_callback(self, msg):
         pose = msg.pose[msg.name.index("turtlebot3_burger")]
@@ -257,21 +197,63 @@ class Supervisor:
         if self.mode == Mode.IDLE:
             self.mode = Mode.NAV
 
+    def delivery_callback(self,msg):
+        delivery_targets = msg.data.split(',')
+        if len(self.delivery_targets) == 0:
+            self.delivery_targets = ['/'+target+'_0' for target in delivery_targets]
+            self.get_next_target()
+
+    def get_next_target(self):
+        if 'return_to_home' in self.delivery_targets[0]:
+            self.x_g = 0.0
+            self.y_g = 0.0
+            self.theta_g = 0.0
+            return
+
+        tgts_plus_dist = []
+        while len(self.delivery_targets) > 0: #danger danger, while loop
+            obj = self.delivery_targets[0]
+            try:
+                (dist_1,rot) = self.trans_listener.lookupTransform(obj, '/base_footprint', rospy.Time()) 
+                tgts_plus_dist.append((obj, math.sqrt(dist_1[0]**2 + dist_1[1]**2)))
+                del self.delivery_targets[0]
+
+            except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
+                rospy.loginfo(e)
+
+        self.delivery_targets = sorted(tgts_plus_dist, key=lambda tup: tup[1])
+        self.delivery_targets = [a[0] for a in self.delivery_targets] 
+        self.delivery_targets.reverse() #just need names (NOTE IN REVERSED ORDER!!! Used for popping)
+
+        self.set_next_target(self.delivery_targets.pop())
+
+    def set_next_target(self, tgt_name):
+        while True:
+            try:
+                (dist_1,rot) = self.trans_listener.lookupTransform(tgt_name, '/map', rospy.Time()) 
+                self.x_g = dist_1[0]
+                self.y_g = dist_1[1]
+                self.theta_g = dist_1[2]
+                break
+
+            except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
+                rospy.loginfo(e)
+
+
     def within_range_of_stop(self, sign_frame_id):
         try:
             t = self.trans_listener.getLatestCommonTime(sign_frame_id, '/base_footprint')
-            (dist_1,rot) = self.trans_listener.lookupTransform(sign_frame_id, '/base_footprint', t)
-            t.secs -= 1 #HYPER COARSE! GOING BACK A FULL SECOND!
-            (dist_2,rot) = self.trans_listener.lookupTransform(sign_frame_id, '/base_footprint', t)
-
+            #self.trans_listener.waitForTransform(sign_frame_id, '/base_footprint', rospy.Time().now(), rospy.Duration(4.0))
+            (dist_1,rot) = self.trans_listener.lookupTransform(sign_frame_id, '/base_footprint', rospy.Time()) 
             #rospy.loginfo((dist_1[0], dist_2[0], dist_1[0]- dist_2[0]))
             if dist_1[0] > 0 and dist_1[0] < STOP_MIN_DIST and abs(dist_1[1]) < STOP_MIN_DIST:
-                return [True, dist_2[0] - dist_1[0] > 0.1]
+                return True
             else:
-                return [False, dist_2[0] - dist_1[0] > 0.1]
+                return False
 
-        except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
-            return [-1]
+        except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException) as e:
+            rospy.loginfo(e)
+            return -1
 
 
     def detect_stop(self, sign_frame_id):
@@ -280,35 +262,10 @@ class Supervisor:
 
         # distance of the stop sign
         win = self.within_range_of_stop(sign_frame_id)
-        rospy.loginfo(win)
-        if win[0] == -1: pass
+        if win == -1: return
 
-        if win[0] and win[1] and self.mode == Mode.NAV: #if in front of sign, and closer than 1 second ago (by some error margin)
+        if win and self.mode == Mode.NAV: #if in front of sign, and closer than 1 second ago (by some error margin)
                 self.init_stop_sign(sign_frame_id)
-        # stop_x = data[0]
-        # stop_y = data[1]
-        # stop_r = data[2]
-        # stop_alph = data[3]
-
-        # correct_side = (stop_r - self.x*math.cos(stop_alph) - self.y*math.sin(stop_alph)) > 0
-        # correct_direction = (2*(self.V>0)-1)*self.theta
-        # while correct_direction > math.pi:
-        #     correct_direction -= 2*math.pi
-        # while correct_direction < -math.pi:
-        #     correct_direction += 2*math.pi
-        # while stop_alph > math.pi:
-        #     stop_alph -= 2*math.pi
-        # while stop_alph < -math.pi:
-        #     stop_alph += 2*math.pi
-        # correct_direction = (abs(stop_alph - correct_direction) < math.pi/3) #traveling within 120 degrees of the stop sign
-
-        # dist = math.sqrt((self.x - stop_x)**2 \
-        #             + (self.y - stop_y)**2)
-
-        # # if close enough and in nav mode, stop
-        # if dist > 0 and dist < STOP_MIN_DIST and correct_direction and correct_side and self.mode == Mode.NAV:
-        #     self.stop_sign_loc = data
-        #     self.init_stop_sign()
 
 
     ############ your code starts here ############
@@ -369,37 +326,14 @@ class Supervisor:
 
     def has_crossed(self):
         """ checks if crossing maneuver is over """
-        # stop_x = self.stop_sign_loc[0]
-        # stop_y = self.stop_sign_loc[1]
-        # stop_r = self.stop_sign_loc[2]
-        # stop_alph = self.stop_sign_loc[3]
-        # dist = math.sqrt((self.x - stop_x)**2 + (self.y - stop_y)**2)
-        # correct_side = (stop_r - self.x*math.cos(stop_alph) - self.y*math.sin(stop_alph)) > 0
         within = self.within_range_of_stop(self.crossing_sign)
-        if within[0] == -1: return False
-        return (self.mode == Mode.CROSS and not within[0])
+        if within == -1: return False
+        return (self.mode == Mode.CROSS and not within)
 
     def loop(self):
         """ the main loop of the robot. At each iteration, depending on its
         mode (i.e. the finite state machine's state), if takes appropriate
         actions. This function shouldn't return anything """
-
-        TESTING = False
-
-        if TESTING:
-            target = "stop_sign"
-            if target in self.map:
-                # TESTING
-                estimator_msg = DetectedObject()
-                estimator_msg.id = 22
-                estimator_msg.name = "stop_sign"
-                estimator_msg.confidence = 99
-                estimator_msg.distance = math.sqrt((self.x - self.map[target][0][0])**2 \
-                    + (self.y - self.map[target][0][1])**2)
-                estimator_msg.thetaleft = self.map[target][0][0]
-                estimator_msg.thetaright = self.map[target][0][1]
-                estimator_msg.corners = [0, 0, 0, 0]#[dist, x_from_cam, y_from_cam, th_c]
-                self.location_publisher.publish(estimator_msg)
 
         #################################################################################
         # Do not change this for hw2 -- this won't affect your FSM since you are using gazebo
@@ -423,11 +357,21 @@ class Supervisor:
             rospy.loginfo("Current Mode: %s", self.mode)
             self.last_mode_printed = self.mode
 
-        #rospy.loginfo(self.map)
+        if len(self.delivery_targets) > 0 and self.close_to(self.x_g,self.y_g,self.theta_g):
+            self.get_next_target()
+            if len(self.delivery_targets) == 0: #shopping done, come home
+                self.delivery_targets.append('return_to_home')
+            else if self.delivery_targets[0] in 'return_to_home':
+                self.delivery_targets = []
+
 
         # checks wich mode it is in and acts accordingly
         if self.mode == Mode.IDLE:
             # send zero velocity
+            for frame in self.trans_listener.getFrameStrings():
+                #Can add more if cases here for different results (for example, navigate around puddle)
+                if "stop_sign" in frame: #ie stop_sign_1, stop_sign_2, etc
+                    self.detect_stop(frame)
             self.stay_idle()
 
         elif self.mode == Mode.POSE:
@@ -451,7 +395,7 @@ class Supervisor:
                 self.nav_to_pose()
                 if self.close_to(self.x_g,self.y_g,self.theta_g):
                     self.mode = Mode.IDLE
-            self.mode = Mode.NAV
+            self.mode = Mode.NAV if not self.mode==Mode.IDLE
 
         elif self.mode == Mode.NAV:
             if self.close_to(self.x_g,self.y_g,self.theta_g):
