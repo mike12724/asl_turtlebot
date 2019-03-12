@@ -361,7 +361,7 @@ class Supervisor:
             self.get_next_target()
             if len(self.delivery_targets) == 0: #shopping done, come home
                 self.delivery_targets.append('return_to_home')
-            else if self.delivery_targets[0] in 'return_to_home':
+            elif self.delivery_targets[0] in 'return_to_home':
                 self.delivery_targets = []
 
 
@@ -395,7 +395,9 @@ class Supervisor:
                 self.nav_to_pose()
                 if self.close_to(self.x_g,self.y_g,self.theta_g):
                     self.mode = Mode.IDLE
-            self.mode = Mode.NAV if not self.mode==Mode.IDLE
+                    
+            if not self.mode==Mode.IDLE:
+                self.mode = Mode.NAV 
 
         elif self.mode == Mode.NAV:
             if self.close_to(self.x_g,self.y_g,self.theta_g):
