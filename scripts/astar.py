@@ -131,7 +131,7 @@ class AStar(object):
         while len(self.open_set)>0:
             # TODO: fill me in!
             x_current = self.find_best_f_score()
-            if x_current==x_goal:
+            if x_current==self.x_goal:
                 self.path = self.reconstruct_path()
                 return True
             self.open_set.remove(x_current)
@@ -147,7 +147,7 @@ class AStar(object):
                     continue
                 self.came_from[neighbor] = x_current
                 self.g_score[neighbor] = tentative_g_score
-                self.f_score[neighbor] = tentative_g_score + self.distance(neighbor,x_goal)
+                self.f_score[neighbor] = tentative_g_score + self.distance(neighbor, self.x_goal)
         return False
 
 # A 2D state space grid with a set of rectangular obstacles. The grid is fully deterministic
@@ -189,28 +189,28 @@ class DetOccupancyGrid2D(object):
 # occupancy = DetOccupancyGrid2D(width, height, obstacles)
 
 # A large random example
-width = 101
-height = 101
-num_obs = 15
-min_size = 5
-max_size = 25
-obs_corners_x = np.random.randint(0,width,num_obs)
-obs_corners_y = np.random.randint(0,height,num_obs)
-obs_lower_corners = np.vstack([obs_corners_x,obs_corners_y]).T
-obs_sizes = np.random.randint(min_size,max_size,(num_obs,2))
-obs_upper_corners = obs_lower_corners + obs_sizes
-obstacles = zip(obs_lower_corners,obs_upper_corners)
-occupancy = DetOccupancyGrid2D(width, height, obstacles)
-x_init = tuple(np.random.randint(0,width-2,2).tolist())
-x_goal = tuple(np.random.randint(0,height-2,2).tolist())
-while not (occupancy.is_free(x_init) and occupancy.is_free(x_goal)):
-    x_init = tuple(np.random.randint(0,width-2,2).tolist())
-    x_goal = tuple(np.random.randint(0,height-2,2).tolist())
+# width = 101
+# height = 101
+# num_obs = 15
+# min_size = 5
+# max_size = 25
+# obs_corners_x = np.random.randint(0,width,num_obs)
+# obs_corners_y = np.random.randint(0,height,num_obs)
+# obs_lower_corners = np.vstack([obs_corners_x,obs_corners_y]).T
+# obs_sizes = np.random.randint(min_size,max_size,(num_obs,2))
+# obs_upper_corners = obs_lower_corners + obs_sizes
+# obstacles = zip(obs_lower_corners,obs_upper_corners)
+# occupancy = DetOccupancyGrid2D(width, height, obstacles)
+# x_init = tuple(np.random.randint(0,width-2,2).tolist())
+# x_goal = tuple(np.random.randint(0,height-2,2).tolist())
+# while not (occupancy.is_free(x_init) and occupancy.is_free(x_goal)):
+#     x_init = tuple(np.random.randint(0,width-2,2).tolist())
+#     x_goal = tuple(np.random.randint(0,height-2,2).tolist())
 
-astar = AStar((0, 0), (width, height), x_init, x_goal, occupancy)
+# astar = AStar((0, 0), (width, height), x_init, x_goal, occupancy)
 
-if not astar.solve():
-    print "No path found"
-    exit(0)
+# if not astar.solve():
+#     print "No path found"
+#     exit(0)
 
-astar.plot_path()
+# astar.plot_path()
