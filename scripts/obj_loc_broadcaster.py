@@ -14,7 +14,7 @@ from copy import deepcopy
 # if using gmapping, you will have a map frame. otherwise it will be odom frame
 mapping = rospy.get_param("map")
 
-DIST_THRESHOLD = 0.5
+DIST_THRESHOLD = 0.35
 
 class obj_loc_broadcaster:
     def __init__(self):

@@ -15,6 +15,7 @@ from geometry_msgs.msg import Twist, PoseArray, Pose2D, PoseStamped, Point, Poin
 from asl_turtlebot.msg import DetectedObject
 import tf
 import math
+import numpy as np
 from enum import Enum
 import detector # for loading object labels
 from collections import defaultdict 
@@ -89,6 +90,7 @@ class Supervisor:
         #publish to cmd_nav instead to use navigator.py!!!!
         self.pose_goal_publisher = rospy.Publisher('/cmd_pose', Pose2D, queue_size=10)
         # command vel (used for idling)
+        self.nav_goal_publisher = rospy.Publisher('/cmd_nav', Pose2D, queue_size=10)
         self.cmd_vel_publisher = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
         # publish to obj_loc_broadcaster
         self.obj_loc_publisher = rospy.Publisher('/supervisor/object_position', PoseStamped, queue_size=10)
@@ -114,7 +116,7 @@ class Supervisor:
         for class_label in self.dict_of_all_obj_labels.values():
             # Here, we can pick which labels we want a subscriber for. 
             # Check out the COCO dataset if you want to know which are options.
-            if class_label != "stop_sign": continue
+            if not class_label in ["stop_sign", "banana"]: continue
             print("INFO: creating subscriber for: {}".format(class_label))
             rospy.Subscriber(
                 '/detector/'+class_label, 
@@ -245,8 +247,9 @@ class Supervisor:
             t = self.trans_listener.getLatestCommonTime(sign_frame_id, '/base_footprint')
             #self.trans_listener.waitForTransform(sign_frame_id, '/base_footprint', rospy.Time().now(), rospy.Duration(4.0))
             (dist_1,rot) = self.trans_listener.lookupTransform(sign_frame_id, '/base_footprint', rospy.Time()) 
-            #rospy.loginfo((dist_1[0], dist_2[0], dist_1[0]- dist_2[0]))
-            if dist_1[0] > 0 and dist_1[0] < STOP_MIN_DIST and abs(dist_1[1]) < STOP_MIN_DIST:
+            euler = tf.transformations.euler_from_quaternion(rot)
+            th = euler[2]
+            if dist_1[0] > 0 and dist_1[0] < STOP_MIN_DIST and abs(dist_1[1]) < STOP_MIN_DIST and abs(th) >= 3*np.pi/4:
                 return True
             else:
                 return False
@@ -292,7 +295,8 @@ class Supervisor:
         nav_g_msg.y = self.y_g
         nav_g_msg.theta = self.theta_g
 
-        self.pose_goal_publisher.publish(nav_g_msg)
+        #self.pose_goal_publisher.publish(nav_g_msg)
+        self.nav_goal_publisher.publish(nav_g_msg)
 
     def stay_idle(self):
         """ sends zero velocity to stay put """

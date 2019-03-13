@@ -4,11 +4,14 @@
   <rosparam param="use_tf">True</rosparam>
   <rosparam param="rviz">true</rosparam>
 
-  <node pkg="asl_turtlebot" type="supervisor.py" name="turtlebot_navigator" output="screen"/>
+  <node pkg="asl_turtlebot" type="supervisor.py" name="super_trooper" output="screen"/>
 
-  <node pkg="asl_turtlebot" type="detector_viz.py" name="tuebot_navigator" />
-  <node pkg="asl_turtlebot" type="obj_loc_broadcaster.py" name="ebot_navigator" output="screen" />
+  <node pkg="asl_turtlebot" type="detector_viz.py" name="detector_viz"/>
 
-  <node pkg="asl_turtlebot" type="pose_controller.py" name="pose_controller" output="screen" />
+  <node pkg="asl_turtlebot" type="obj_loc_broadcaster.py" name="broadcaster"/>
+
+  <node pkg="asl_turtlebot" type="pose_controller.py" name="pose_controller"/>
+  
+  <node pkg="asl_turtlebot" type="navigator.py" name="navy_mcnav_face" />
   <node name="rviz" pkg="rviz" type="rviz" args="-d $(find asl_turtlebot)/rviz/project_sim.rviz"/>
 </launch>
