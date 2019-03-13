@@ -32,7 +32,7 @@ mapping = rospy.get_param("map")
 
 
 # threshold at which we consider the robot at a location
-POS_EPS = .1
+POS_EPS = .3
 THETA_EPS = .3
 
 #threshold for considering two detected objects as the same
@@ -239,7 +239,7 @@ class Supervisor:
         while True:
             try:
                 (dist_1,rot) = self.trans_listener.lookupTransform(tgt_name, '/map', rospy.Time()) 
-                ang = np.atan2(dist_1[1]-self.y, dist_1[0]-self.x)             
+                ang = np.arctan2(dist_1[1]-self.y, dist_1[0]-self.x)             
                 self.x_g = dist_1[0]
                 self.y_g = dist_1[1]
                 self.theta_g = ang
@@ -371,7 +371,7 @@ class Supervisor:
             rospy.loginfo("Current Mode: %s", self.mode)
             self.last_mode_printed = self.mode
 
-        if len(self.delivery_targets) > 0 and self.close_to(self.x_g,self.y_g,self.theta_g):
+        if len(self.delivery_targets) > 0 and self.close_to(self.x_g,self.y_g,self.theta):
             self.get_next_target()
             if len(self.delivery_targets) == 0: #shopping done, come home
                 self.delivery_targets.append('return_to_home')
@@ -393,7 +393,7 @@ class Supervisor:
             if self.close_to(self.x_g,self.y_g,self.theta_g):
                 self.mode = Mode.IDLE
             else:
-                self.go_to_pose()
+                self.nav_to_pose()
 
         elif self.mode == Mode.STOP:
             while not self.has_stopped():

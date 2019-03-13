@@ -7,6 +7,7 @@ Panels:
         - /Global Options1
         - /Status1
         - /TF1
+        - /TF1/Frames1
       Splitter Ratio: 0.5
     Tree Height: 310
   - Class: rviz/Selection
@@ -27,7 +28,7 @@ Panels:
     Experimental: false
     Name: Time
     SyncMode: 0
-    SyncSource: LaserScan
+    SyncSource: ""
 Visualization Manager:
   Class: ""
   Displays:
@@ -94,6 +95,8 @@ Visualization Manager:
       Frame Timeout: 15
       Frames:
         All Enabled: false
+        backpack_0:
+          Value: true
         base_footprint:
           Value: true
         camera:
@@ -103,45 +106,15 @@ Visualization Manager:
         odom:
           Value: false
         person_0:
-          Value: false
+          Value: true
         person_1:
-          Value: false
-        person_10:
-          Value: false
-        person_11:
-          Value: false
-        person_12:
-          Value: false
-        person_13:
-          Value: false
-        person_14:
-          Value: false
-        person_15:
-          Value: false
-        person_16:
-          Value: false
-        person_17:
-          Value: false
-        person_18:
-          Value: false
-        person_19:
-          Value: false
+          Value: true
         person_2:
-          Value: false
+          Value: true
         person_3:
-          Value: false
+          Value: true
         person_4:
-          Value: false
-        person_5:
-          Value: false
-        person_6:
-          Value: false
-        person_7:
-          Value: false
-        person_8:
-          Value: false
-        person_9:
-          Value: false
+          Value: true
         raspicam:
           Value: false
         velodyne:
@@ -153,6 +126,8 @@ Visualization Manager:
       Show Names: true
       Tree:
         map:
+          backpack_0:
+            {}
           odom:
             base_footprint:
               raspicam:
@@ -164,41 +139,11 @@ Visualization Manager:
             {}
           person_1:
             {}
-          person_10:
-            {}
-          person_11:
-            {}
-          person_12:
-            {}
-          person_13:
-            {}
-          person_14:
-            {}
-          person_15:
-            {}
-          person_16:
-            {}
-          person_17:
-            {}
-          person_18:
-            {}
-          person_19:
-            {}
           person_2:
             {}
           person_3:
             {}
           person_4:
-            {}
-          person_5:
-            {}
-          person_6:
-            {}
-          person_7:
-            {}
-          person_8:
-            {}
-          person_9:
             {}
       Update Interval: 0
       Value: true
@@ -291,7 +236,7 @@ Visualization Manager:
   Value: true
   Views:
     Current:
-      Angle: 0
+      Angle: -0.00499999989
       Class: rviz/TopDownOrtho
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.0599999987
@@ -301,7 +246,7 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.00999999978
-      Scale: 81.0529709
+      Scale: 179.182297
       Target Frame: <Fixed Frame>
       Value: TopDownOrtho (rviz)
       X: 1.46277249
