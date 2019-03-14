@@ -4,6 +4,8 @@
   <rosparam param="use_tf">True</rosparam>
   <rosparam param="rviz">true</rosparam>
 
+  <node pkg="asl_turtlebot" type="visualizer.py" name="whatsgoinon"/>
+  
   <node pkg="asl_turtlebot" type="supervisor.py" name="super_trooper" output="screen"/>
 
   <node pkg="asl_turtlebot" type="detector_viz.py" name="detector_viz"/>
