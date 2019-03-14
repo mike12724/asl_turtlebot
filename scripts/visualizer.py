@@ -34,8 +34,14 @@ class Visualizer:
         self.V = 0
         self.om = 0
 
+        self.x_g = 0
+        self.y_g = 0
+        self.theta_g = 0
+
+        self.pub_items = []
+
         self.trans_listener = tf.TransformListener()
-        rospy.Subscriber('/cmd_vel', Twist, self.velocity_callback)
+        rospy.Subscriber('/cmd_nav', Pose2D, self.nav_callback)
 
         if use_gazebo:
             rospy.Subscriber('/gazebo/model_states', ModelStates, self.gazebo_callback)
@@ -53,9 +59,10 @@ class Visualizer:
         euler = tf.transformations.euler_from_quaternion(quaternion)
         self.theta = euler[2]
 
-    def velocity_callback(self,msg):
-        self.V = msg.linear.x
-        self.om = msg.angular.z
+    def nav_callback(self,msg):
+        self.x_g = msg.x
+        self.y_g = msg.y
+        self.theta_g = msg.theta
 
 
     def loop(self):
@@ -70,48 +77,64 @@ class Visualizer:
             except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
                 pass
 
+    def create_object(self,frame_id,obj_type,obj_id,pos,ori,scale, color):
+        robo_sphere = Marker()
+        robo_sphere.header.frame_id = frame_id
+        robo_sphere.header.stamp = rospy.Time()
+        robo_sphere.ns = "robot"
+        robo_sphere.id = obj_id
+        robo_sphere.type = obj_type #sphere
+        robo_sphere.action = 0 #add
+
+        robo_sphere.pose.position.x = pos[0] #because we're in footprint id?
+        robo_sphere.pose.position.y = pos[1]
+        robo_sphere.pose.position.z = pos[2]
+
+        robo_sphere.pose.orientation.x = ori[0] #because we're in footprint id?
+        robo_sphere.pose.orientation.y = ori[1]
+        robo_sphere.pose.orientation.z = ori[2]
+        robo_sphere.pose.orientation.w = ori[3]
+
+        robo_sphere.scale.x = scale[0]
+        robo_sphere.scale.y = scale[1]
+        robo_sphere.scale.z = scale[2]
+
+        robo_sphere.color.a = 1.0
+        robo_sphere.color.r = color[0]
+        robo_sphere.color.g = color[1]
+        robo_sphere.color.b = color[2]
+
+        robo_sphere.lifetime = rospy.Duration(0)
+        #robo_sphere.frame_locked = 1
+
+        if obj_id == 2:
+            for item in self.pub_items:
+                if item.id == 2:
+                    item.action=2
+                    self.pub.publish(item)
+                    self.pub_items.remove(item)
+
+
+        if robo_sphere not in self.pub_items:
+            self.pub_items.append(robo_sphere)
+
 
 
     def run(self):
         rate = rospy.Rate(10) # 10 Hz
-
-        #publish sphere marker on bot
-        robo_sphere = Marker()
-        robo_sphere.header.frame_id = "/base_footprint"
-        robo_sphere.header.stamp = rospy.Time()
-        robo_sphere.ns = "robot"
-        robo_sphere.id = 0
-        robo_sphere.type = 2 #sphere
-        robo_sphere.action = 0 #add
-
-        robo_sphere.pose.position.x = 0 #because we're in footprint id?
-        robo_sphere.pose.position.y = 0
-        robo_sphere.pose.position.z = 0
-
-        robo_sphere.pose.orientation.x = 0 #because we're in footprint id?
-        robo_sphere.pose.orientation.y = 0
-        robo_sphere.pose.orientation.z = 0
-        robo_sphere.pose.orientation.w = 0
-
-        robo_sphere.scale.x = 0.15
-        robo_sphere.scale.y = 0.15
-        robo_sphere.scale.z = 0.15
-
-        robo_sphere.color.a = 1.0
-        robo_sphere.color.r = 0.0
-        robo_sphere.color.g = 0.0
-        robo_sphere.color.b = 1.0
-
-        robo_sphere.lifetime = rospy.Duration(0)
-        robo_sphere.frame_locked = 1
+        origin_frame = "/map" if mapping else "/odom"
+        self.create_object("/base_footprint",2,0,[0.,0.,0.],[0.,0.,0.,1.],[.15,.15,.15],[0,0,1.])
 
         #publish arrow marker on bot, in direction of pose (blue)
-
+        self.create_object("/base_footprint",0,1,[0,0,0],[0,0,0,0],[.15,.03,.1],[0,0,1])
         #publish arrow marker on bot, in direction of velocity (green)
 
-        while not rospy.is_shutdown():     
-            self.pub.publish(robo_sphere) 
-            #self.loop()
+        while not rospy.is_shutdown():    
+            z = tf.transformations.quaternion_from_euler(0,0,self.theta_g)
+            self.create_object(origin_frame,0,2,[self.x_g,self.y_g,0],[z[0],z[1],z[2],z[3]],[.15,.06,.1],[0,0,1]) 
+            for item in self.pub_items:
+                self.pub.publish(item) 
+            self.loop()
             rate.sleep()
 
 
